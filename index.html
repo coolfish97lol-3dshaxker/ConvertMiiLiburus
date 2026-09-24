@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>iManga PDF Converter</title>
+
+  <!-- PDF generator -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+
+  <!-- CBZ/ZIP reader -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #11141a;
+      color: white;
+    }
+
+    header {
+      text-align: center;
+      padding: 30px 15px 10px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+    }
+
+    header p {
+      color: #aaa;
+    }
+
+    .container {
+      width: min(850px, 92%);
+      margin: auto;
+    }
+
+    .box {
+      background: #1b2029;
+      border: 1px solid #333b4a;
+      border-radius: 16px;
+      padding: 25px;
+      margin-top: 20px;
+    }
+
+    #dropZone {
+      border: 2px dashed #687386;
+      border-radius: 14px;
+      padding: 45px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    #dropZone:hover,
+    #dropZone.dragging {
+      background: #252c38;
+      border-color: white;
+    }
+
+    #dropZone strong {
+      font-size: 20px;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      margin-top: 20px;
+      align-items: center;
+    }
+
+    select {
+      background: #11151c;
+      color: white;
+      border: 1px solid #444d5e;
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 9px;
+      padding: 12px 18px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    #makePDF {
+      background: white;
+      color: black;
+    }
+
+    #clearButton {
+      background: #343c4b;
+      color: white;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #status {
+      margin-top: 18px;
+      color: #c7cedb;
+      white-space: pre-wrap;
+    }
+
+    progress {
+      width: 100%;
+      height: 14px;
+      margin-top: 12px;
+    }
+
+    #pageList {
+      max-height: 250px;
+      overflow-y: auto;
+      padding-left: 25px;
+    }
+
+    #pageList li {
+      margin: 5px 0;
+      color: #cdd3de;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .info {
+      color: #9da6b6;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+  <h1>📚 iManga PDF Converter</h1>
+  <p>Convert manga images and CBZ files into PDFs for 3DS.</p>
+</header>
+
+<div class="container">
+
+  <div class="box">
+
+    <div id="dropZone">
+      <strong>📖 Drop manga files here</strong>
+      <br><br>
+      Or click to choose files
+      <br><br>
+      <span class="info">
+        JPG • PNG • WebP • GIF • BMP • CBZ
+      </span>
+
+      <input
+        type="file"
+        id="fileInput"
+        multiple
+        accept="image/*,.cbz,.zip"
+      >
+    </div>
+
+    <div class="controls">
+
+      <label>
+        PDF mode:
+        <select id="pdfMode">
+          <option value="3ds">🎮 3DS Optimized</option>
+          <option value="large">📖 Large Quality</option>
+        </select>
+      </label>
+
+      <label>
+        Page order:
+        <select id="pageOrder">
+          <option value="normal">Normal</option>
+          <option value="reverse">Reverse</option>
+        </select>
+      </label>
+
+    </div>
+
+    <div class="controls">
+      <button id="makePDF" disabled>
+        📄 Make PDF
+      </button>
+
+      <button id="clearButton">
+        🗑️ Clear
+      </button>
+    </div>
+
+    <div id="status">
+      No files selected.
+    </div>
+
+    <progress
+      id="progress"
+      value="0"
+      max="100"
+      class="hidden">
+    </progress>
+
+  </div>
+
+
+  <div class="box hidden" id="pageBox">
+
+    <h2>📑 Pages</h2>
+
+    <ol id="pageList"></ol>
+
+  </div>
+
+</div>
+
+
+<script>
+
+const fileInput = document.getElementById("fileInput");
+const dropZone = document.getElementById("dropZone");
+
+const makePDFButton = document.getElementById("makePDF");
+const clearButton = document.getElementById("clearButton");
+
+const status = document.getElementById("status");
+const progress = document.getElementById("progress");
+
+const pageBox = document.getElementById("pageBox");
+const pageList = document.getElementById("pageList");
+
+const pdfMode = document.getElementById("pdfMode");
+const pageOrder = document.getElementById("pageOrder");
+
+let pages = [];
+
+
+// -------------------------------------
+// FILE PICKER
+// -------------------------------------
+
+dropZone.addEventListener("click", () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener("change", () => {
+  addFiles(Array.from(fileInput.files));
+});
+
+
+// -------------------------------------
+// DRAG AND DROP
+// -------------------------------------
+
+dropZone.addEventListener("dragover", (event) => {
+
+  event.preventDefault();
+
+  dropZone.classList.add("dragging");
+
+});
+
+dropZone.addEventListener("dragleave", () => {
+
+  dropZone.classList.remove("dragging");
+
+});
+
+dropZone.addEventListener("drop", (event) => {
+
+  event.preventDefault();
+
+  dropZone.classList.remove("dragging");
+
+  const files = Array.from(event.dataTransfer.files);
+
+  addFiles(files);
+
+});
+
+
+// -------------------------------------
+// ADD FILES
+// -------------------------------------
+
+async function addFiles(files) {
+
+  const newPages = [];
+
+  for (const file of files) {
+
+    // CBZ / ZIP
+    if (
+      file.name.toLowerCase().endsWith(".cbz") ||
+      file.name.toLowerCase().endsWith(".zip")
+    ) {
+
+      try {
+
+        status.textContent =
+          "📦 Opening " + file.name + "...";
+
+        const zip = await JSZip.loadAsync(file);
+
+        const entries = Object.values(zip.files)
+
+          .filter(entry =>
+            !entry.dir &&
+            /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(entry.name)
+          )
+
+          .sort((a, b) =>
+            a.name.localeCompare(
+              b.name,
+              undefined,
+              {
+                numeric: true,
+                sensitivity: "base"
+              }
+            )
+          );
+
+        for (const entry of entries) {
+
+          const blob = await entry.async("blob");
+
+          const imageFile = new File(
+            [blob],
+            entry.name.split("/").pop(),
+            {
+              type: blob.type || "image/jpeg"
+            }
+          );
+
+          newPages.push(imageFile);
+
+        }
+
+      }
+
+      catch (error) {
+
+        alert(
+          "Could not open " +
+          file.name +
+          "\n\n" +
+          error.message
+        );
+
+      }
+
+    }
+
+    // Normal image
+    else if (
+      file.type.startsWith("image/") ||
+      /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(file.name)
+    ) {
+
+      newPages.push(file);
+
+    }
+
+  }
+
+  pages.push(...newPages);
+
+  renderPages();
+
+}
+
+
+// -------------------------------------
+// SORT FILES
+// -------------------------------------
+
+function getSortedPages() {
+
+  const sorted = [...pages].sort((a, b) => {
+
+    return a.name.localeCompare(
+      b.name,
+      undefined,
+      {
+        numeric: true,
+        sensitivity: "base"
+      }
+    );
+
+  });
+
+  if (pageOrder.value === "reverse") {
+
+    sorted.reverse();
+
+  }
+
+  return sorted;
+
+}
+
+
+// -------------------------------------
+// DISPLAY PAGE LIST
+// -------------------------------------
+
+function renderPages() {
+
+  const sorted = getSortedPages();
+
+  pageList.innerHTML = "";
+
+  for (const file of sorted) {
+
+    const item = document.createElement("li");
+
+    item.textContent = file.name;
+
+    pageList.appendChild(item);
+
+  }
+
+  if (sorted.length > 0) {
+
+    pageBox.classList.remove("hidden");
+
+    makePDFButton.disabled = false;
+
+    status.textContent =
+      "✅ " +
+      sorted.length +
+      " page(s) ready.";
+
+  }
+
+  else {
+
+    pageBox.classList.add("hidden");
+
+    makePDFButton.disabled = true;
+
+    status.textContent =
+      "No files selected.";
+
+  }
+
+}
+
+
+// Re-sort when order changes
+pageOrder.addEventListener(
+  "change",
+  renderPages
+);
+
+
+// -------------------------------------
+// LOAD IMAGE
+// -------------------------------------
+
+function loadImage(file) {
+
+  return new Promise((resolve, reject) => {
+
+    const url = URL.createObjectURL(file);
+
+    const image = new Image();
+
+    image.onload = () => {
+
+      URL.revokeObjectURL(url);
+
+      resolve(image);
+
+    };
+
+    image.onerror = () => {
+
+      URL.revokeObjectURL(url);
+
+      reject(
+        new Error(
+          "Could not load " + file.name
+        )
+      );
+
+    };
+
+    image.src = url;
+
+  });
+
+}
+
+
+// -------------------------------------
+// MAKE PDF
+// -------------------------------------
+
+makePDFButton.addEventListener(
+  "click",
+  async () => {
+
+    const sortedPages = getSortedPages();
+
+    if (sortedPages.length === 0) {
+      return;
+    }
+
+    makePDFButton.disabled = true;
+
+    progress.classList.remove("hidden");
+
+    progress.value = 0;
+
+    status.textContent =
+      "📄 Creating PDF...";
+
+    try {
+
+      const { jsPDF } = window.jspdf;
+
+      let pdf = null;
+
+      for (
+        let i = 0;
+        i < sortedPages.length;
+        i++
+      ) {
+
+        const file = sortedPages[i];
+
+        status.textContent =
+          "📖 Converting page " +
+          (i + 1) +
+          " of " +
+          sortedPages.length +
+          "...";
+
+        const image = await loadImage(file);
+
+
+        // --------------------------------
+        // 3DS SIZE
+        // --------------------------------
+
+        let maxWidth;
+        let maxHeight;
+        let quality;
+
+        if (pdfMode.value === "3ds") {
+
+          maxWidth = 800;
+          maxHeight = 480;
+
+          quality = 0.82;
+
+        }
+
+        else {
+
+          maxWidth = 1600;
+          maxHeight = 2400;
+
+          quality = 0.90;
+
+        }
+
+
+        // --------------------------------
+        // CALCULATE SIZE
+        // --------------------------------
+
+        const scale = Math.min(
+          1,
+          maxWidth / image.naturalWidth,
+          maxHeight / image.naturalHeight
+        );
+
+        const width = Math.max(
+          1,
+          Math.round(
+            image.naturalWidth * scale
+          )
+        );
+
+        const height = Math.max(
+          1,
+          Math.round(
+            image.naturalHeight * scale
+          )
+        );
+
+
+        // --------------------------------
+        // CANVAS
+        // --------------------------------
+
+        const canvas =
+          document.createElement("canvas");
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const context =
+          canvas.getContext("2d");
+
+        context.fillStyle = "white";
+
+        context.fillRect(
+          0,
+          0,
+          width,
+          height
+        );
+
+        context.drawImage(
+          image,
+          0,
+          0,
+          width,
+          height
+        );
+
+
+        // --------------------------------
+        // JPEG
+        // --------------------------------
+
+        const imageData =
+          canvas.toDataURL(
+            "image/jpeg",
+            quality
+          );
+
+
+        // --------------------------------
+        // CREATE PDF
+        // --------------------------------
+
+        if (pdf === null) {
+
+          pdf = new jsPDF({
+
+            orientation:
+              height > width
+                ? "portrait"
+                : "landscape",
+
+            unit: "px",
+
+            format: [
+              width,
+              height
+            ],
+
+            compress: true
+
+          });
+
+        }
+
+        else {
+
+          pdf.addPage(
+            [width, height],
+            height > width
+              ? "portrait"
+              : "landscape"
+          );
+
+        }
+
+
+        pdf.addImage(
+          imageData,
+          "JPEG",
+          0,
+          0,
+          width,
+          height,
+          undefined,
+          "FAST"
+        );
+
+
+        // --------------------------------
+        // PROGRESS
+        // --------------------------------
+
+        progress.value =
+          Math.round(
+            ((i + 1) /
+              sortedPages.length) *
+            100
+          );
+
+
+        // Give browser time to breathe
+        await new Promise(
+          resolve =>
+            setTimeout(resolve, 0)
+        );
+
+      }
+
+
+      // --------------------------------
+      // DOWNLOAD
+      // --------------------------------
+
+      pdf.save(
+        "iManga-3DS.pdf"
+      );
+
+      status.textContent =
+        "🎉 Done!\n\n" +
+        "Created iManga-3DS.pdf\n" +
+        sortedPages.length +
+        " page(s).";
+
+    }
+
+    catch (error) {
+
+      console.error(error);
+
+      status.textContent =
+        "❌ PDF conversion failed:\n\n" +
+        error.message;
+
+    }
+
+    finally {
+
+      makePDFButton.disabled = false;
+
+    }
+
+  }
+);
+
+
+// -------------------------------------
+// CLEAR
+// -------------------------------------
+
+clearButton.addEventListener(
+  "click",
+  () => {
+
+    pages = [];
+
+    fileInput.value = "";
+
+    pageList.innerHTML = "";
+
+    pageBox.classList.add("hidden");
+
+    makePDFButton.disabled = true;
+
+    progress.classList.add("hidden");
+
+    progress.value = 0;
+
+    status.textContent =
+      "No files selected.";
+
+  }
+);
+
+</script>
+
+</body>
+</html>
